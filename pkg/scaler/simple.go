@@ -20,6 +20,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -71,7 +72,7 @@ func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.Ass
 	defer func() {
 		log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
 	}()
-	log.Printf("Assign, request id: %s", request.RequestId)
+	//log.Printf("Assign, request id: %s", request.RequestId)
 	s.mu.Lock()
 	if element := s.idleInstance.Front(); element != nil {
 		instance := element.Value.(*model.Instance)
@@ -188,9 +189,9 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 }
 
 func (s *Simple) deleteSlot(ctx context.Context, requestId, slotId, instanceId, metaKey, reason string) {
-	log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
+	//log.Printf("start delete Instance %s (Slot: %s) of app: %s", instanceId, slotId, metaKey)
 	if err := s.platformClient.DestroySLot(ctx, requestId, slotId, reason); err != nil {
-		log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
+		//log.Printf("delete Instance %s (Slot: %s) of app: %s failed with: %s", instanceId, slotId, metaKey, err.Error())
 	}
 }
 
@@ -198,6 +199,17 @@ func (s *Simple) gcLoop() {
 	log.Printf("gc loop for app: %s is started", s.metaData.Key)
 	ticker := time.NewTicker(s.config.GcInterval)
 	for range ticker.C {
+		metric := s.Stats()
+
+		expectIdleNum := int(math.Ceil(float64(metric.TotalInstance) * 0.3))
+		log.Printf("TotalIdleInstance-expectIdleNum=%d:%d, TotalInstance=%d", metric.TotalIdleInstance, expectIdleNum, metric.TotalInstance)
+
+		if expectIdleNum < metric.TotalIdleInstance {
+			removeNum := metric.TotalIdleInstance - expectIdleNum
+			log.Printf("need to remove %d", removeNum)
+			s.removeIdleInstance(removeNum)
+			continue
+		}
 		for {
 			s.mu.Lock()
 			if element := s.idleInstance.Back(); element != nil {
@@ -225,6 +237,30 @@ func (s *Simple) gcLoop() {
 	}
 }
 
+func (s *Simple) removeIdleInstance(num int) {
+	for num > 0 {
+		s.mu.Lock()
+
+		num--
+		if element := s.idleInstance.Back(); element != nil {
+			instance := element.Value.(*model.Instance)
+			idleDuration := time.Now().Sub(instance.LastIdleTime)
+			s.idleInstance.Remove(element)
+			delete(s.instances, instance.Id)
+			go func() {
+				reason := fmt.Sprintf("Idle duration: %fs, excceed configured duration: %fs", idleDuration.Seconds(), s.config.IdleDurationBeforeGC.Seconds())
+				ctx := context.Background()
+				ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				s.deleteSlot(ctx, uuid.NewString(), instance.Slot.Id, instance.Id, instance.Meta.Key, reason)
+			}()
+			continue
+		}
+		s.mu.Lock()
+
+	}
+
+}
 func (s *Simple) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()

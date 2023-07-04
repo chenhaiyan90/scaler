@@ -173,7 +173,7 @@ ACR 产品页 ：https://www.aliyun.com/product/acr 。
 #### 生成镜像并推送至镜像仓库
 登录ACR镜像仓库
 ```
-docker login --username=xxx registry.cn-shanghai.aliyuncs.com
+docker login --username=595316059@qq.com registry.cn-shanghai.aliyuncs.com
 ```
 构建镜像并推送至ACR镜像仓库
 ```
@@ -185,6 +185,11 @@ docker buildx build --platform linux/amd64 -t $IMAGE_REPO:$IMAGE_TAG . --push
 比如: 生成镜像registry.cn-shanghai.aliyuncs.com/cloudnative-challenge/scaler:v1.0， 命令如下:
 ```
 docker buildx build --platform linux/amd64 -t registry.cn-shanghai.aliyuncs.com/cloudnative-challenge/scaler:v1.0 . --push
+
+docker buildx build --platform linux/amd64 -t registry.cn-shanghai.aliyuncs.com/cloud-native-challenge-haiyan/scaler:v1.1 . --push
+
+docker build -t registry.cn-shanghai.aliyuncs.com/cloud-native-challenge-haiyan/scaler:v1.1 . --push
+
 ```
 
 ### 部署测试job
