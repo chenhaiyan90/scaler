@@ -67,10 +67,10 @@ func New(metaData *model.Meta, config *config.Config) Scaler {
 }
 
 func (s *Simple) Assign(ctx context.Context, request *pb.AssignRequest) (*pb.AssignReply, error) {
-	start := time.Now()
+	//start := time.Now()
 	instanceId := uuid.New().String()
 	defer func() {
-		log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
+		//log.Printf("Assign, request id: %s, instance id: %s, cost %dms", request.RequestId, instanceId, time.Since(start).Milliseconds())
 	}()
 	//log.Printf("Assign, request id: %s", request.RequestId)
 	s.mu.Lock()
@@ -146,10 +146,10 @@ func (s *Simple) Idle(ctx context.Context, request *pb.IdleRequest) (*pb.IdleRep
 		Status:       pb.Status_Ok,
 		ErrorMessage: nil,
 	}
-	start := time.Now()
+	//start := time.Now()
 	instanceId := request.Assigment.InstanceId
 	defer func() {
-		log.Printf("Idle, request id: %s, instance: %s, cost %dus", request.Assigment.RequestId, instanceId, time.Since(start).Microseconds())
+		//log.Printf("Idle, request id: %s, instance: %s, cost %dus", request.Assigment.RequestId, instanceId, time.Since(start).Microseconds())
 	}()
 	//log.Printf("Idle, request id: %s", request.Assigment.RequestId)
 	needDestroy := false
@@ -198,18 +198,44 @@ func (s *Simple) deleteSlot(ctx context.Context, requestId, slotId, instanceId, 
 func (s *Simple) gcLoop() {
 	log.Printf("gc loop for app: %s is started", s.metaData.Key)
 	ticker := time.NewTicker(s.config.GcInterval)
+	loopNum := 0
+	//preWorkingNum,lastWorkingNum,curWorkingNum:=0,0,0
 	for range ticker.C {
 		metric := s.Stats()
+		loopNum++
+		workingNum := metric.TotalInstance - metric.TotalIdleInstance
+		//preWorkingNum,lastWorkingNum,curWorkingNum=lastWorkingNum,curWorkingNum,workingNum
+		log.Printf("key=%s,index-%d,working_num=%d", s.metaData.Key, loopNum, workingNum)
 
-		expectIdleNum := int(math.Ceil(float64(metric.TotalInstance) * 0.3))
-		log.Printf("TotalIdleInstance-expectIdleNum=%d:%d, TotalInstance=%d", metric.TotalIdleInstance, expectIdleNum, metric.TotalInstance)
-
-		if expectIdleNum < metric.TotalIdleInstance {
-			removeNum := metric.TotalIdleInstance - expectIdleNum
-			log.Printf("need to remove %d", removeNum)
-			s.removeIdleInstance(removeNum)
+		if metric.TotalIdleInstance == 0 || metric.TotalInstance == 0 {
 			continue
 		}
+
+		if workingNum > 0 {
+			expectIdleNum := int(math.Ceil(float64(workingNum) * 0.3))
+			if expectIdleNum < metric.TotalIdleInstance {
+				removeNum := metric.TotalIdleInstance - expectIdleNum
+				log.Printf("index-%d-t-w-i=%d-%d-%d,need to remove %d", loopNum, metric.TotalInstance, workingNum, metric.TotalIdleInstance, removeNum)
+				s.removeIdleInstance(removeNum)
+			} else if expectIdleNum > metric.TotalIdleInstance {
+				addNum := expectIdleNum - metric.TotalIdleInstance
+				var baseInfo *model.Instance
+				for _, v := range s.instances {
+					baseInfo = v
+					break
+				}
+				if baseInfo != nil {
+					s.addIdleInstanceNum(context.TODO(), baseInfo, addNum)
+					log.Printf("index-%d-t-w-i=%d-%d-%d,need to add %d", loopNum, metric.TotalInstance, workingNum, metric.TotalIdleInstance, addNum)
+				}
+			}
+			continue
+		} else {
+			//如果正在work数为0，则移除一半idle
+			removeNum := int(math.Floor(float64(metric.TotalIdleInstance) * 0.4))
+			s.removeIdleInstance(removeNum)
+		}
+
 		for {
 			s.mu.Lock()
 			if element := s.idleInstance.Back(); element != nil {
@@ -259,8 +285,52 @@ func (s *Simple) removeIdleInstance(num int) {
 		s.mu.Lock()
 
 	}
-
 }
+func (s *Simple) addIdleInstanceNum(ctx context.Context, instanceInfo *model.Instance, num int) {
+	for num > 0 {
+		num--
+		s.addIdleInstance(ctx, instanceInfo)
+	}
+}
+func (s *Simple) addIdleInstance(ctx context.Context, instanceInfo *model.Instance) {
+	//Create new Instance
+	resourceConfig := model.SlotResourceConfig{
+		ResourceConfig: pb.ResourceConfig{
+			MemoryInMegabytes: instanceInfo.Meta.MemoryInMb,
+		},
+	}
+	requestId := uuid.New().String()
+	slot, err := s.platformClient.CreateSlot(ctx, requestId, &resourceConfig)
+	if err != nil {
+		errorMessage := fmt.Sprintf("create slot failed with: %s", err.Error())
+		log.Printf(errorMessage)
+		return
+	}
+
+	meta := &model.Meta{
+		Meta: pb.Meta{
+			Key:           instanceInfo.Meta.Key,
+			Runtime:       instanceInfo.Meta.Runtime,
+			TimeoutInSecs: instanceInfo.Meta.TimeoutInSecs,
+		},
+	}
+	instanceId := uuid.New().String()
+
+	instance, err := s.platformClient.Init(ctx, requestId, instanceId, slot, meta)
+	if err != nil {
+		errorMessage := fmt.Sprintf("create instance failed with: %s", err.Error())
+		log.Printf(errorMessage)
+		return
+	}
+
+	//add new instance
+	s.mu.Lock()
+	instance.Busy = false
+	s.instances[instance.Id] = instance
+	s.mu.Unlock()
+	s.idleInstance.PushFront(instance)
+}
+
 func (s *Simple) Stats() Stats {
 	s.mu.Lock()
 	defer s.mu.Unlock()

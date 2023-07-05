@@ -186,7 +186,7 @@ docker buildx build --platform linux/amd64 -t $IMAGE_REPO:$IMAGE_TAG . --push
 ```
 docker buildx build --platform linux/amd64 -t registry.cn-shanghai.aliyuncs.com/cloudnative-challenge/scaler:v1.0 . --push
 
-docker buildx build --platform linux/amd64 -t registry.cn-shanghai.aliyuncs.com/cloud-native-challenge-haiyan/scaler:v1.1 . --push
+docker buildx build --platform linux/amd64 -t registry.cn-shanghai.aliyuncs.com/cloud-native-challenge-haiyan/scaler:v1.301 . --push
 
 docker build -t registry.cn-shanghai.aliyuncs.com/cloud-native-challenge-haiyan/scaler:v1.1 . --push
 
