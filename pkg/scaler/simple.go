@@ -219,20 +219,13 @@ func (s *Simple) gcLoop() {
 				s.removeIdleInstance(removeNum)
 			} else if expectIdleNum > metric.TotalIdleInstance {
 				addNum := expectIdleNum - metric.TotalIdleInstance
-				var baseInfo *model.Instance
-				for _, v := range s.instances {
-					baseInfo = v
-					break
-				}
-				if baseInfo != nil {
-					s.addIdleInstanceNum(context.TODO(), baseInfo, addNum)
-					log.Printf("index-%d-t-w-i=%d-%d-%d,need to add %d", loopNum, metric.TotalInstance, workingNum, metric.TotalIdleInstance, addNum)
-				}
+				s.addIdleInstanceNum(context.Background(), addNum)
+				log.Printf("index-%d-t-w-i=%d-%d-%d,need to add %d", loopNum, metric.TotalInstance, workingNum, metric.TotalIdleInstance, addNum)
 			}
 			continue
 		} else {
 			//如果正在work数为0，则移除一半idle
-			removeNum := int(math.Floor(float64(metric.TotalIdleInstance) * 0.4))
+			removeNum := int(math.Floor(float64(metric.TotalIdleInstance) * 0.5))
 			s.removeIdleInstance(removeNum)
 		}
 
@@ -286,17 +279,17 @@ func (s *Simple) removeIdleInstance(num int) {
 
 	}
 }
-func (s *Simple) addIdleInstanceNum(ctx context.Context, instanceInfo *model.Instance, num int) {
+func (s *Simple) addIdleInstanceNum(ctx context.Context, num int) {
 	for num > 0 {
 		num--
-		s.addIdleInstance(ctx, instanceInfo)
+		s.addIdleInstance(ctx)
 	}
 }
-func (s *Simple) addIdleInstance(ctx context.Context, instanceInfo *model.Instance) {
+func (s *Simple) addIdleInstance(ctx context.Context) {
 	//Create new Instance
 	resourceConfig := model.SlotResourceConfig{
 		ResourceConfig: pb.ResourceConfig{
-			MemoryInMegabytes: instanceInfo.Meta.MemoryInMb,
+			MemoryInMegabytes: s.metaData.MemoryInMb,
 		},
 	}
 	requestId := uuid.New().String()
@@ -309,9 +302,9 @@ func (s *Simple) addIdleInstance(ctx context.Context, instanceInfo *model.Instan
 
 	meta := &model.Meta{
 		Meta: pb.Meta{
-			Key:           instanceInfo.Meta.Key,
-			Runtime:       instanceInfo.Meta.Runtime,
-			TimeoutInSecs: instanceInfo.Meta.TimeoutInSecs,
+			Key:           s.metaData.Key,
+			Runtime:       s.metaData.Runtime,
+			TimeoutInSecs: s.metaData.TimeoutInSecs,
 		},
 	}
 	instanceId := uuid.New().String()
